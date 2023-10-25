@@ -1,0 +1,351 @@
+---
+title: "Assignment 3"
+subtitle: "Due at 11:59pm on October 24."
+format: html
+editor: visual
+---
+
+You may work in pairs or individually for this assignment. Make sure you join a group in Canvas if you are working in pairs. Turn in this assignment as an HTML or PDF file to ELMS. Make sure to include the R Markdown or Quarto file that was used to generate it. Include the GitHub link for the repository containing these files.
+
+**Github Link: https://github.com/luzmariav/Assignment3**
+
+```{r}
+library(xml2)
+library(rvest)
+library(tidyverse)
+```
+
+## Web Scraping
+
+In this assignment, your task is to scrape some information from Wikipedia. We start with the following page about Grand Boulevard, a Chicago Community Area.
+
+<https://en.wikipedia.org/wiki/Grand_Boulevard,_Chicago>
+
+The ultimate goal is to gather the table "Historical population" and convert it to a `data.frame`.
+
+As a first step, read in the html page as an R object. Extract the tables from this object (using the `rvest` package) and save the result as a new object. Follow the instructions if there is an error. Use `str()` on this new object \-- it should be a list. Try to find the position of the "Historical population" in this list since we need it in the next step.
+
+Extract the "Historical population" table from the list and save it as another object. You can use subsetting via `[[…]]` to extract pieces from a list. Print the result.
+
+You will see that the table needs some additional formatting. We only want rows and columns with actual values (I called the table object `pop`).
+
+```{r}
+# pop <- pop[2:10, -3]
+# pop
+```
+
+```{r results="hide"}
+wikiurl <- read_html("https://en.wikipedia.org/wiki/Grand_Boulevard,_Chicago")
+str(wikiurl)
+
+chicagowiki <- html_elements(wikiurl, xpath = '//*[contains(concat( " ", @class, " " ), concat( " ", "us-census-pop-left", " " ))]//td | //*[contains(concat( " ", @class, " " ), concat( " ", "us-census-pop-left", " " ))]//th')
+str(chicagowiki)
+
+wikipop <- html_text(chicagowiki)
+
+```
+
+```{r}
+
+Wikitable <- wikipop[5:44] %>% 
+  matrix(ncol=4, byrow=TRUE) %>%  
+  as.data.frame() 
+
+names(Wikitable) <- wikipop[1:4]
+
+Wikitable <- Wikitable[,c(1,2,4)]
+  
+
+```
+
+```{r echo = FALSE}
+print(Wikitable)
+```
+
+## Expanding to More Pages
+
+That's it for this page. However, we may want to repeat this process for other community areas. The Wikipedia page https://en.wikipedia.org/wiki/Grand_Boulevard,\_Chicago has a section on "Places adjacent to Grand Boulevard, Chicago" at the bottom. Can you find the corresponding table in the list of tables that you created earlier? Extract this table as a new object.
+
+Then, grab the community areas east of Grand Boulevard and save them as a character vector. Print the result.
+
+```{r results="hide"}
+tables <- html_elements(wikiurl, xpath = '//*[contains(concat( " ", @class, " " ), concat( " ", "navbox-odd", " " ))]//td')
+
+str(tables)
+```
+
+```{r}
+
+tables1 <- html_text(tables)
+
+tables2 <- tables1%>% 
+  matrix(ncol=3, byrow=TRUE) %>% 
+  as.data.frame() %>% 
+  rename(West= V1) %>% 
+  rename(NorthSouth=V2) %>% 
+  rename(East=V3) %>% 
+  filter(!grepl("^\\s*$", East)) %>% 
+  mutate_all(~str_replace_all(., " ", "_"))
+
+table2_list <- unlist(tables2, use.names = FALSE)
+table2_list <- table2_list[table2_list != ""]
+table2listall <- gsub("\\n", " ", trimws(table2_list))
+
+EastOnes <- tables2$East
+EastOnes1 <- unlist(EastOnes, use.names = FALSE)
+EastOnes2 <- EastOnes1[EastOnes1 != ""]
+
+```
+
+```{r echo = FALSE}
+print(EastOnes2)
+```
+
+We want to use this list to create a loop that extracts the population tables from the Wikipedia pages of these places. To make this work and build valid urls, we need to replace empty spaces in the character vector with underscores. This can be done with `gsub()`, or by hand. The resulting vector should look like this: "Oakland,\_Chicago" "Kenwood,\_Chicago" "Hyde_Park,\_Chicago"
+
+To prepare the loop, we also want to copy our `pop` table and rename it as `pops`. In the loop, we append this table by adding columns from the other community areas.
+
+```{r}
+# pops <- pop
+```
+
+Build a small loop to test whether you can build valid urls using the vector of places and pasting each element of it after `https://en.wikipedia.org/wiki/` in a for loop. Calling `url` shows the last url of this loop, which should be `https://en.wikipedia.org/wiki/Hyde_Park,_Chicago`.
+
+```{r}
+# for(i in places_east) {
+#   url <- ...
+#   }
+# url
+```
+
+Finally, extend the loop and add the code that is needed to grab the population tables from each page. Add columns to the original table `pops` using `cbind()`.
+
+```{r}
+Wikitable1 <- Wikitable
+```
+
+```{r results="hide"}
+for (i in EastOnes2) {
+    url <- paste0("https://en.wikipedia.org/wiki/", i)
+    src <- read_html(url)
+    print(url)
+    
+    nds <- html_elements(src, xpath = '//*[contains(concat( " ", @class, " " ), concat( " ", "us-census-pop-right", " " ))]//td | //*[contains(concat( " ", @class, " " ), concat( " ", "us-census-pop-right", " " ))]//th')
+    
+    str(nds)
+    
+    pop <- html_text(nds)
+    
+    wable <- pop[5:44] %>%
+      matrix(ncol = 4, byrow = TRUE) %>%
+      as.data.frame()
+    
+    if (is.null(wable) || nrow(wable) == 0) {
+      warning("No data found for ", i)
+      next
+    }
+    
+    names(wable) <- pop[1:4]
+    wable <- wable[, c(1, 2, 4)]
+    print(wable)
+    
+    if (ncol(Wikitable1) == 0) {
+      Wikitable1 <- wable
+    } else {
+      Wikitable1 <- cbind(Wikitable1, wable)
+    }
+  }
+  
+```
+
+```{r echo = FALSE}
+print(Wikitable1)
+```
+
+## Scraping and Analyzing Text Data
+
+Suppose we wanted to take the actual text from the Wikipedia pages instead of just the information in the table. Our goal in this section is to extract the text from the body of the pages, then do some basic text cleaning and analysis.
+
+First, scrape just the text without any of the information in the margins or headers. For example, for "Grand Boulevard", the text should start with, "**Grand Boulevard** on the [South Side](https://en.wikipedia.org/wiki/South_Side,_Chicago "South Side, Chicago") of [Chicago](https://en.wikipedia.org/wiki/Chicago "Chicago"), [Illinois](https://en.wikipedia.org/wiki/Illinois "Illinois"), is one of the ...". Make sure all of the text is in one block by using something like the code below (I called my object `description`).
+
+```{r}
+# description <- description %>% paste(collapse = ' ')
+```
+
+Using a similar loop as in the last section, grab the descriptions of the various communities areas. Make a tibble with two columns: the name of the location and the text describing the location.
+
+```{r results= "hide"}
+ library(xml2)
+   library(rvest)
+   library(tidyverse)
+   library(tidytext)
+   
+  Textdata <- tibble(Text = character(), Location = character())  
+   
+   for (i in table2listall) {
+     url <- paste0("https://en.wikipedia.org/wiki/", i)
+     src <- read_html(url)
+     print(url)
+     textnds <- html_elements(src, xpath = ' //ul[(((count(preceding-sibling::*) + 1) = 23) and parent::*)]//li | //p | //p//b'
+     )
+     
+     
+     textnds2 <- html_text(textnds) %>% paste(collapse='')
+     
+     textnds3 <- tibble(Text = textnds2, Location=i) 
+     print(textnds3)  
+     
+     Textdata <- rbind(Textdata, textnds3) 
+   }
+```
+
+```{r echo = FALSE}
+print(Textdata)
+```
+
+Let's clean the data using `tidytext`. If you have trouble with this section, see the example shown in <https://www.tidytextmining.com/tidytext.html>
+
+```{r}
+library(tidytext)
+```
+
+Create tokens using `unnest_tokens`. Make sure the data is in one-token-per-row format. Remove any stop words within the data. What are the most common words used overall?
+
+Plot the most common words within each location. What are some of the similarities between the locations? What are some of the differences?
+
+```{r}
+textwords <- Textdata %>%
+   unnest_tokens(word, Text) %>% 
+   anti_join(stop_words) %>% 
+   anti_join(data.frame(word=c( "chicago","2", "10" )))  
+   
+ 
+textwords %>% 
+   count(word, sort=T)
+
+ 
+```
+
+```{r}
+textwords %>% 
+   count(word, sort=T) %>% 
+   slice_head(n = 20) %>%
+   ggplot(aes(n,word)) +
+   geom_col()+
+   xlab("Counts")+
+   ylab("Word")+
+   ggtitle("Popular Words for ALL")
+   
+
+textwords %>%
+  filter(Location =='Armour_Square,_Chicago') %>% 
+  count(word, sort=T) %>% 
+  slice_head(n = 30) %>% 
+  ggplot(aes(n, word)) +
+  geom_col()+
+  xlab("Counts")+
+  ylab("Word")+
+  ggtitle("Popular Words for Armour Square")
+
+textwords %>%
+  filter(Location =='Hyde_Park,_Chicago') %>% 
+  count(word, sort=T) %>% 
+  slice_head(n = 30) %>% 
+  ggplot(aes(n, word)) +
+  geom_col()+
+  xlab("Counts")+
+  ylab("Word")+
+  ggtitle("Popular Words for Hyde Park")
+
+textwords %>%
+  filter(Location =='Oakland,_Chicago') %>% 
+  count(word, sort=T) %>% 
+  slice_head(n = 30) %>% 
+  ggplot(aes(n, word)) +
+  geom_col()+
+  xlab("Counts")+
+  ylab("Word")+
+  ggtitle("Popular Words for Oakland")
+
+textwords %>%
+  filter(Location =='Fuller_Park,_Chicago') %>% 
+  count(word, sort=T) %>% 
+  slice_head(n = 30) %>% 
+  ggplot(aes(n, word)) +
+  geom_col()+
+  xlab("Counts")+
+  ylab("Word")+
+  ggtitle("Popular Words for Fuller Park")
+
+textwords %>%
+  filter(Location =='Grand_Boulevard,_Chicago') %>% 
+  count(word, sort=T) %>% 
+  slice_head(n = 30) %>% 
+  ggplot(aes(n, word)) +
+  geom_col()+
+  xlab("Counts")+
+  ylab("Word")+
+  ggtitle("Popular Words for Grand_Boulevard")
+
+
+textwords %>%
+  filter(Location =='Douglas,_Chicago') %>% 
+  count(word, sort=T) %>% 
+  slice_head(n = 30) %>% 
+  ggplot(aes(n, word)) +
+  geom_col()+
+  xlab("Counts")+
+  ylab("Word")+
+  ggtitle("Popular Words for Douglas")
+
+
+textwords %>%
+  filter(Location =='Kenwood,_Chicago') %>% 
+  count(word, sort=T) %>% 
+  slice_head(n = 30) %>% 
+  ggplot(aes(n, word)) +
+  geom_col()+
+  xlab("Counts")+
+  ylab("Word")+
+  ggtitle("Popular Words for Kenwood")
+
+
+
+
+```
+
+```{r}
+  wikiurltext <- read_html("https://en.wikipedia.org/wiki/Washington_Park_(community_area),_Chicago")
+  
+  chicagowikitext <- html_elements(wikiurltext, xpath = '//p | //b')
+  
+  wikipoptext <- html_text(chicagowikitext) %>% paste(collapse='')
+  
+  Wikipoptext2 <- tibble(Text = wikipoptext) 
+   
+  
+  textwordsWash <- Wikipoptext2 %>%
+    unnest_tokens(word, Text) %>% 
+    anti_join(stop_words) %>% 
+    anti_join(data.frame(word=c("park", "chicago", "hyde","2", "10" )))
+  
+  textwordsWash %>%
+    count(word, sort=T) %>% 
+    slice_head(n = 30) %>% 
+    ggplot(aes(n, word)) +
+    geom_col()+
+    xlab("Counts")+
+    ylab("Word")+
+    ggtitle("Popular Words for Washington_Park")
+  
+```
+
+**Description:**
+
+The most common words are park, Hyde, street, south, and community. These words have a frequency of 50 or more. The other words have a frequency of 39 or less. This makes sense because these words are usually frequently when describing a location, the most popular streets, directions, and what the community is like. The words "Hyde" and "Park" are popular because these are used for the location of Hyde Park and also many of the locations we looked at had "park" in their name.
+
+For the individual locations, most of the common words for each location were the name of the location. The similarities between the locations are that the names had the biggest frequencies, but most correlated with the most popular words for all. Many locations had park, neighborhood, south, and community in the top words. Some differences between the locations were that popular words of their popular locations such as Chinatown and University. Grand Boulevard has a lot of historical dates as popular words and popular people. Hyde Park had popular words like university and house, along with popular streets. Oakland had popular words such as housing, homes, and African. Fuller Park had popular words such as population and community. Douglas had popular words such as black and Bronzeville. Washington had popular words like american and African which may be from the town history.
+
+**Side note!!!**
+
+Washington Park did not have the same format for the name after the wiki page which is why it could not be included in the loop unless you change the name there.
